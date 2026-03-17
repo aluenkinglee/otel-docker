@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # OpenTelemetry Collector - 接收 Claude Code 的遥测数据
+  otel-collector:
+    image: docker.m.daocloud.io/otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics exporter
+      - "8889:8889"   # Prometheus metrics exporter (for metrics pipeline)
+    depends_on:
+      - prometheus
+    networks:
+      - otel-network
+
+  # Prometheus - 存储和查询指标数据
+  prometheus:
+    image: docker.m.daocloud.io/prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - otel-network
+
+  # Grafana - 可视化仪表板
+  grafana:
+    image: docker.m.daocloud.io/grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - otel-network
+
+  # Jaeger - 追踪（可选，用于分布式追踪）
+  jaeger:
+    image: docker.m.daocloud.io/jaegertracing/all-in-one:latest
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14250:14250"  # gRPC
+      - "9411:9411"    # Zipkin compatible endpoint
+    networks:
+      - otel-network
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  otel-network:
+    driver: bridge
