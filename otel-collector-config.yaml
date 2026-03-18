@@ -10,10 +10,11 @@ processors:
   batch:
 
 exporters:
-  prometheusremotewrite:
-    endpoint: http://prometheus:9090/api/v1/write
-    tls:
-      insecure: true
+  # 使用 Prometheus exporter (scrape 方式)
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    const_labels:
+      environment: "production"
 
   debug:
     verbosity: detailed
@@ -23,7 +24,7 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheusremotewrite, debug]
+      exporters: [prometheus, debug]
 
     logs:
       receivers: [otlp]
