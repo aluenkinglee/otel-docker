@@ -23,6 +23,21 @@
 
 Claude Code 官方提供了 OpenTelemetry 支持，但是**部署过程并非一帆风顺**。本项目记录了从零开始的完整部署过程，包括遇到的所有问题、解决方案和经验总结。
 
+### 📊 监控效果展示
+
+部署完成后，您可以在 Grafana 中看到实时更新的监控数据：
+
+![Claude Code Dashboard](img/grafana_claude_code_dashboard.png)
+
+**Dashboard 包含以下面板**：
+- ✅ **Active Time (seconds)** - 显示总活跃时间
+- ✅ **Total Cost (USD)** - 累计成本统计
+- ✅ **Total Tokens** - Token 使用总数
+- ✅ **Token Usage Over Time** - Token 使用趋势图
+- ✅ **Cost Over Time** - 成本变化趋势图
+
+所有数据每 10 秒自动刷新，实时反映您的 Claude Code 使用情况。
+
 ## ✨ 功能特性
 
 - 💰 **成本追踪** - 实时监控 API 使用成本
@@ -54,159 +69,6 @@ Grafana (可视化展示)
 | **Grafana** | latest | 3000 | 可视化仪表板 |
 | **Jaeger** | all-in-one | 16686 | 分布式追踪（可选） |
 
-## 🎯 完整部署历程
-
-### 第一阶段：基础设施准备（遇到的挑战）
-
-#### 挑战 1：Docker Desktop → OrbStack
-
-**问题**：
-- 初始使用 Docker Desktop，但发现资源占用较大
-- 切换到 OrbStack 后需要适应新的命令
-
-**解决方案**：
-```bash
-# 使用 Homebrew 安装 OrbStack
-brew install orbstack
-
-# 启动 OrbStack
-orb start
-```
-
-**经验**：OrbStack 启动更快，资源占用更少，非常适合本地开发。
-
-#### 挑战 2：网络访问问题
-
-**问题**：
-- Docker Hub (registry-1.docker.io) 完全无法连接
-- 镜像拉取失败（100% 丢包）
-
-**解决方案**：
-配置国内镜像加速器：
-```bash
-# 创建 ~/.docker/daemon.json
-cat > ~/.docker/daemon.json << 'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://hub.rat.dev"
-  ]
-}
-EOF
-
-# 重启 OrbStack
-orb restart
-```
-
-**经验**：在中国大陆地区，配置镜像加速器是必需的。
-
-### 第二阶段：服务部署（配置调试）
-
-#### 挑战 3：OTEL Collector Exporter 弃用
-
-**问题**：
-```
-'exporters' the logging exporter has been deprecated, use the debug exporter instead
-```
-
-**解决方案**：
-修改 `otel-collector-config.yaml`：
-```yaml
-exporters:
-  debug:              # 不是 logging
-    verbosity: detailed
-  prometheus:
-    endpoint: "0.0.0.0:8889"
-```
-
-**经验**：OpenTelemetry 更新频繁，要及时关注弃用警告。
-
-#### 挑战 4：Prometheus Remote Write 404 错误
-
-**问题**：
-```
-failed to send WriteRequest to remote endpoint
-status_code: 404, status: "404 Not Found"
-error: "remote write receiver needs to be enabled with --web.enable-remote-write-receiver"
-```
-
-**解决方案**：
-在 `docker-compose.yml` 中添加启动参数：
-```yaml
-prometheus:
-  command:
-    - '--web.enable-remote-write-receiver'  # 关键！
-```
-
-**后续优化**：
-改用 scrape 方式（更稳定）：
-```yaml
-# OTEL Collector 配置
-exporters:
-  prometheus:
-    endpoint: "0.0.0.0:8889"
-
-# Prometheus 配置
-scrape_configs:
-  - job_name: 'otel-collector'
-    static_configs:
-      - targets: ['otel-collector:8889']
-```
-
-**经验**：Scrape 方式比 remote write 更可靠，推荐使用。
-
-### 第三阶段：数据收集验证
-
-#### 挑战 5：环境变量配置困惑
-
-**问题**：
-- 在终端 A 中设置环境变量
-- 在终端 B 中启动 Claude Code
-- 结果：环境变量不生效！
-
-**解决方案**：
-```bash
-# ✅ 正确做法：在同一终端中
-source ~/otel-docker/test-claude-env.sh
-claude
-
-# ❌ 错误做法：分开在不同终端
-# 终端 1: source ~/otel-docker/test-claude-env.sh
-# 终端 2: claude  ← 环境变量不会传递！
-```
-
-**经验**：环境变量只在设置它的终端窗口中有效。
-
-### 第四阶段：Dashboard 配置
-
-#### 挑战 6：指标名称不匹配
-
-**问题**：
-- Dashboard 中查询：`claude_code_session_count_total`
-- 实际指标：`claude_code_active_time_seconds_total`
-- 结果：查询失败，没有数据
-
-**发现的实际指标**：
-```promql
-claude_code_active_time_seconds_total    # 活跃时间
-claude_code_cost_usage_USD_total         # 成本
-claude_code_token_usage_tokens_total     # Token 使用
-```
-
-**解决方案**：
-更新 Dashboard 查询使用正确的指标名称：
-```json
-{
-  "targets": [
-    {
-      "expr": "claude_code_token_usage_tokens_total"
-    }
-  ]
-}
-```
-
-**经验**：指标名称必须完全匹配，大小写敏感！
 
 ## 🚀 快速开始
 
@@ -316,166 +178,6 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 | **[DASHBOARD_FIX.md](./DASHBOARD_FIX.md)** | Dashboard 修复说明 |
 | **[QUICKSTART.md](./QUICKSTART.md)** | 快速开始指南 |
 
-## 💡 经验总结和最佳实践
-
-### 成功要素
-
-1. **逐步验证**
-   - 每完成一步就验证一次
-   - 不要等到最后才测试
-
-2. **查看日志**
-   - 遇到问题首先查看容器日志
-   - 使用 `docker-compose logs -f [service]`
-
-3. **使用诊断工具**
-   - 利用脚本快速定位问题
-   - 不要手动逐个检查
-
-4. **保持耐心**
-   - 配置调试需要时间
-   - 每个问题都有解决方案
-
-### 常见陷阱
-
-1. **环境变量传递问题**
-   - ❌ 在不同终端设置和使用
-   - ✅ 在同一终端设置和使用
-
-2. **指标名称大小写**
-   - ❌ `claude_code_token_usage_total`
-   - ✅ `claude_code_token_usage_tokens_total`
-
-3. **时间范围设置**
-   - ❌ 使用太短的时间范围
-   - ✅ 使用至少 "Last 1 hour"
-
-4. **容器重启时机**
-   - ❌ 修改配置后不重启容器
-   - ✅ 修改配置后重启相关容器
-
-### 性能优化建议
-
-1. **使用国内镜像源**
-   - 大幅提高镜像拉取速度
-   - 解决网络访问问题
-
-2. **选择轻量级运行时**
-   - OrbStack 比 Docker Desktop 更轻量
-   - 启动更快，资源占用更少
-
-3. **合理设置刷新间隔**
-   - Dashboard 设置 10 秒刷新
-   - 避免过于频繁的查询
-
-## 🔧 配置文件说明
-
-### docker-compose.yml
-
-- 使用国内镜像源 `docker.m.daocloud.io`
-- Prometheus 启用 remote write receiver
-- 配置数据持久化 volumes
-
-### otel-collector-config.yaml
-
-- 使用 `debug` exporter（不是 `logging`）
-- 配置 `prometheus` exporter 用于 scrape
-- 批处理 pipeline 配置
-
-### prometheus.yml
-
-- 配置从 otel-collector:8889 抓取数据
-- 15 秒抓取间隔
-- 评估间隔 15 秒
-
-### grafana/dashboards/
-
-- 自动配置 Prometheus 数据源
-- 自动加载 Claude Code Dashboard
-- 使用正确的指标名称
-
-## 📊 Prometheus 查询示例
-
-### 基础查询
-
-```promql
-# 查看 Token 使用量
-claude_code_token_usage_tokens_total
-
-# 查看成本
-claude_code_cost_usage_USD_total
-
-# 查看活跃时间
-claude_code_active_time_seconds_total
-```
-
-### 高级查询
-
-```promql
-# Token 使用率（每秒）
-rate(claude_code_token_usage_tokens_total[5m])
-
-# 成本率（美元/秒）
-rate(claude_code_cost_usage_USD_total[5m])
-
-# 总 Token
-sum(claude_code_token_usage_tokens_total)
-
-# 活跃时间率
-rate(claude_code_active_time_seconds_total[5m])
-```
-
-## 🐛 故障排查
-
-### 问题：没有指标数据
-
-**检查清单**：
-1. 环境变量是否设置？
-   ```bash
-   env | grep OTEL
-   ```
-2. Claude Code 是否在运行？
-3. OTEL Collector 是否正常？
-   ```bash
-   docker-compose logs otel-collector
-   ```
-4. Prometheus 是否有数据？
-   访问 http://localhost:9090 查询指标
-
-### 问题：Dashboard 显示 No Data
-
-**解决步骤**：
-1. 检查时间范围（使用 "Last 1 hour"）
-2. 验证数据源连接
-3. 在 Explore 中测试查询
-4. 检查指标名称是否正确
-
-### 问题：容器启动失败
-
-**解决步骤**：
-1. 查看容器日志：`docker-compose logs [service]`
-2. 检查端口占用：`lsof -i :[port]`
-3. 验证配置文件语法
-4. 完全重启：`docker-compose down && docker-compose up -d`
-
-## 📝 开发历程
-
-### 时间线
-
-- **2026-03-17**: 项目初始化，遇到网络问题
-- **2026-03-17**: 配置镜像加速，服务启动
-- **2026-03-17**: 解决 exporter 弃用问题
-- **2026-03-17**: 修复 Prometheus remote write 问题
-- **2026-03-18**: 修复 Dashboard 指标名称
-- **2026-03-18**: 数据成功收集，Dashboard 正常显示
-- **2026-03-18**: 完善文档，提交到 GitHub
-
-### 提交历史
-
-```
-08fa5a0 fix: 修复 OpenTelemetry 监控栈配置和 Dashboard 指标名称
-2b87656 feat: 初始化 OpenTelemetry 监控栈项目
-```
 
 ## 🌟 项目亮点
 
